@@ -6,52 +6,27 @@ import torch.nn.utils.parametrize as parametrize
 from torch.nn.utils.parametrizations import orthogonal    
 from pathlib import Path
 import sys
-import matplotlib.pyplot as plt
 
-dirName = 'orderTaskDefault'
-n = 2
+dirName = sys.argv[1]
+n = int(sys.argv[2])
 dtype = torch.float32
 device = "cuda" if torch.cuda.is_available() else "cpu"
 torch.set_default_device(device)
 torch.set_default_dtype(dtype)
-
-loss_retrain_threshold = 10e5
-loss_contine_threshold = 5e5
-N_iter_continue = 5000
-N_iter_retrain = 40000
 
 def main():
     root = "./savedForHPC/"+dirName
     for name in os.listdir(root):
         dataDir = os.path.join(root,name)
         if os.path.isdir(dataDir):
-            # if Path(os.path.join(dataDir,f'lowDimFit{n}.pth')).exists():
-            #     continue
-            os.makedirs(os.path.join(dataDir,'circuitInfer'), exist_ok=True)
-            plot_example_cells(dataDir)
-            plt.close('all')
-            loss = get_loss(dataDir)
-            if loss < loss_contine_threshold:
-                print(dataDir,'pass')
-                np.save(os.path.join(dataDir,'circuitInfer','loss.npy'),np.array([loss]))
+            if Path(os.path.join(dataDir,f'lowDimFit{n}.pth')).exists():
                 continue
-
+            print(dataDir)
             
-            if loss>loss_retrain_threshold:
-                retrain = True
-                N_iter = N_iter_retrain
-                print(dataDir,'retrain')
-            else:
-                retrain = False
-                N_iter = N_iter_continue
-                print(dataDir,'continue')
-            loss_old = loss
-
-            fitSavePath = os.path.join(dataDir,f'lowDimFit{n}.pth')
             # ---- load data and copy to GPU
             dataPath = os.path.join(dataDir,'activitityTest.npz')
             with np.load(dataPath) as dataNumpy:
-                xNumpy = dataNumpy['x'][:,0:250,:]
+                xNumpy = dataNumpy['x'][:,0:250,0:2]
                 model_output_Numpy = dataNumpy['model_output']
                 model_state_Numpy = dataNumpy['model_state'][:,0:250,:]
             N_batch,N_timeStep,N_in = xNumpy.shape
@@ -68,16 +43,6 @@ def main():
 
             # ---- construct model
             model = Engel2022Fit(N_node,n,N_in)
-            if not retrain:
-                try:
-                    model.load_state_dict(torch.load(fitSavePath))
-                except RuntimeError:
-                    model = Engel2022Fit(N,n,2)
-                    N_in = 2
-                    # u = u[:,:,0:2]
-                    xTorch = xTorch[:,:,0:2]
-                    xNumpy = xNumpy[:,:,0:2]
-                    model.load_state_dict(torch.load(fitSavePath))
 
             # --- Construct our loss function and an Optimizer. 
             criterion = torch.nn.MSELoss(reduction='sum')
@@ -89,7 +54,7 @@ def main():
             y = model_state_Torch.to(dtype)
 
             try:
-                for t in range(N_iter):
+                for t in range(40000):
                     # Forward pass: Compute predicted y by passing x to the model
                     y_pred = model(u)
 
@@ -113,17 +78,11 @@ def main():
                     optimizer.step()
 
                 # --- save results
-                # fitSavePath = os.path.join(dataDir,f'lowDimFit{n}.pth')
+                fitSavePath = os.path.join(dataDir,f'lowDimFit{n}.pth')
                 print(fitSavePath)
                 torch.save(model.state_dict(), fitSavePath)
             except torch._C._LinAlgError:
                 continue
-            plot_example_cells(dataDir)
-            loss_new = get_loss(dataDir)
-            print('old loss: ', loss_old, '; new loss: ', loss_new)
-            np.save(os.path.join(dataDir,'circuitInfer','loss.npy'),np.array([loss_old,loss_new]))
-
-
 
 class Engel2022Fit(nn.Module):
     def __init__(self,N,n,N_in):
@@ -244,75 +203,8 @@ class leakyRNN(nn.Module):
 
         return hidden
             
-def plot_example_cell(y,y_pred,ax=None):
-    N_batch,_,N_node = y.shape
-    iCell = torch.randint(N_node,())
-    iTrial = torch.randint(N_batch,())
-    if ax is None: fig,ax = plt.subplots()
-    ax.plot(y[iTrial,:,iCell].cpu())
-    ax.plot(y_pred[iTrial,:,iCell].detach().cpu())
-    ax.set_title(f'Trial {iTrial} Cell {iCell}')
-    return ax
 
-def plot_example_cells(dataDir):
-    dataPath,fitSavePath,N,n,N_in,N_batch,u,y = get_data_weight(dataDir)
-    N_node = N
-    try:
-        model = Engel2022Fit(N,n,N_in)
-        model.load_state_dict(torch.load(fitSavePath))
-    except RuntimeError:
-        model = Engel2022Fit(N,n,2)
-        u = u[:,:,0:2]
-        model.load_state_dict(torch.load(fitSavePath))
-    criterion = torch.nn.MSELoss(reduction='sum')
-    y_pred = model(u)    
 
-    fig,axes = plt.subplots(dpi=300,nrows=2,ncols=3,constrained_layout=True)
-    for ax in axes.flatten():
-        plot_example_cell(y,y_pred,ax)
-    # return fig
-    os.makedirs(os.path.join(dataDir,'circuitInfer'), exist_ok=True)
-    fig.savefig(os.path.join(dataDir,'circuitInfer','exampleCells.pdf'))
-
-def get_data_weight(dataDir):
-    # ---- load data and copy to GPU
-    dataPath = os.path.join(dataDir,'activitityTest.npz')
-    with np.load(dataPath) as dataNumpy:
-        xNumpy = dataNumpy['x'][:,0:250,:]
-        model_output_Numpy = dataNumpy['model_output']
-        model_state_Numpy = dataNumpy['model_state'][:,0:250,:]
-    N_batch,N_timeStep,N_in = xNumpy.shape
-    xTorch = torch.tensor(xNumpy)
-    N_out = model_output_Numpy.shape[-1]
-    model_output_Torch = torch.tensor(model_output_Numpy)
-    N_node = model_state_Numpy.shape[-1]
-    model_state_Torch = torch.tensor(model_state_Numpy)
-
-    u = xTorch.to(dtype)
-    y = model_state_Torch.to(dtype)
-
-    N= N_node
-    n=2
-    fitSavePath = os.path.join(dataDir,f'lowDimFit{n}.pth')    
-
-    return dataPath,fitSavePath,N,n,N_in,N_batch,u,y
-
-def get_loss(dataDir):
-
-    dataPath,fitSavePath,N,n,N_in,N_batch,u,y = get_data_weight(dataDir)
-
-    try:
-        model = Engel2022Fit(N,n,N_in)
-        model.load_state_dict(torch.load(fitSavePath))
-    except RuntimeError:
-        model = Engel2022Fit(N,n,2)
-        u = u[:,:,0:2]
-        model.load_state_dict(torch.load(fitSavePath))
-    criterion = torch.nn.MSELoss(reduction='sum')
-    y_pred = model(u)
-    loss = criterion(y_pred, y)
-    # print('loss: ', loss.item())
-    return loss.item()
 
 if __name__ == '__main__':
     main()
