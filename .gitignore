@@ -1,2 +1,14 @@
 code_20250830
 Figures
+Results
+.gitignore
+.git
+.idea
+.vscode
+.DS_Store
+.ipynb_checkpoints
+.ipynb_checkpoints/*
+.ipynb_checkpoints/*.ipynb
+.ipynb_checkpoints/*.ipynb_checkpoints
+.ipynb_checkpoints/*.ipynb_checkpoints/*
+.ipynb_checkpoints/*.ipynb_checkpoints/*.ipynb
