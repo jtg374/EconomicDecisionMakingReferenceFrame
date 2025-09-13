@@ -1,5 +1,5 @@
 # EconomicDecisionMakingReferenceFrame
-code repo for manuscript "Output-Contingent Working Memory and Decision-Making in Economic Choices"
+code repo for manuscript "[Output-Contingent Working Memory and Decision-Making in Economic Choices](https://doi.org/10.1101/2025.08.29.673193)"
 
 # Change log
 - 2025-09-12 created blank repo and upload codes
