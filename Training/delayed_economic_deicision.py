@@ -30,13 +30,16 @@ class DelayedEconomicDecision_AlternateOutput(Task):
         wait_duration (int): Duration of wait period.
         target_delay_duration (int): Duration of choice-to-action mapping target delay period.
         respond_duration (int): Duration of respond period.
-        ind_point (float): instructed indifference point.
+        ind_point (float): base (median) indifference point, around which the trial-by-trial value fluctuates.
+        ind_point_sigma_log (float): fluctuation level of the indifference point, given as the SD on log scale of an Ornstein-Uhlenbeck process advanced once per trial (log-normal stationary distribution). 0 = fixed at ind_point.
+        ind_point_tau (int): autocorrelation time of the indifference point fluctuation, in trials.
+        ind_point_range (tuple): (min,max) hard bounds clipping the fluctuating indifference point. None = no clipping.
         offer_pairs (list): list of offer quantity pairs (qA,qB) to select from.
     """
     def __init__(self, dt, tau, T, N_batch=None,
         onset_time = 500, stim_duration_1 = 500, InterOffer_duration: Union[range,int] = 500, stim_duration_2 = 500, 
         early_conxt=False,
-        wait_duration = 0, target_delay_duration = 200, respond_duration=200,outputMode='both',juiceTrialProp=0.5,offer_pairs=None,N_trials_per_condition=None,ind_point=1.7):
+        wait_duration = 0, target_delay_duration = 200, respond_duration=200,outputMode='both',juiceTrialProp=0.5,offer_pairs=None,N_trials_per_condition=None,ind_point=1.7,ind_point_sigma_log=0.0,ind_point_tau=100,ind_point_range=(1.5,3.0)):
         N_stim = 2
         N_target = 2+2+2
         N_fixation = 2 if early_conxt else 1
@@ -95,7 +98,12 @@ class DelayedEconomicDecision_AlternateOutput(Task):
         self.spatial_options = ['AB', 'BA'] # juice location to select from
         self.choiceFrame_options = ['juice','order'] # target represent juice A/B or order 1st/2nd
         # behavior parameter
-        self.ind_point = ind_point #2*np.random.gamma(20,0.05) # indifference point
+        self.ind_point = ind_point #2*np.random.gamma(20,0.05) # base (median) indifference point
+        self.ind_point_sigma_log = ind_point_sigma_log # fluctuation level (SD of log ind_point); 0 = fixed
+        self.ind_point_tau = ind_point_tau # autocorrelation time of the fluctuation, in trials
+        self.ind_point_range = ind_point_range # hard bounds of the fluctuating ind_point; None = no clipping
+        self._log_ind_point = np.log(ind_point) # current state of the log-space OU process
+        self._ind_point_current = ind_point # indifference point of the current trial
         self.a1_choice = 13 #15*np.random.gamma(100,0.01) # related to steepness
 
 
@@ -112,6 +120,25 @@ class DelayedEconomicDecision_AlternateOutput(Task):
         maxq=4
         minq=0
         return (offerquantity-minq)/(maxq-minq)
+    def _update_ind_point(self):
+        """Advance the indifference point by one Ornstein-Uhlenbeck step in log space.
+
+        Called once per trial from generate_trial_params, so the indifference point
+        slowly fluctuates around self.ind_point with a log-normal stationary distribution
+        (SD on log scale = ind_point_sigma_log, autocorrelation time = ind_point_tau trials),
+        clipped to ind_point_range. No-op when ind_point_sigma_log is 0.
+        """
+        if self.ind_point_sigma_log > 0:
+            step_sd = self.ind_point_sigma_log*np.sqrt(2.0/self.ind_point_tau)
+            self._log_ind_point += (np.log(self.ind_point) - self._log_ind_point)/self.ind_point_tau \
+                + step_sd*np.random.randn()
+            if self.ind_point_range is not None:
+                self._log_ind_point = np.clip(self._log_ind_point,
+                    np.log(self.ind_point_range[0]), np.log(self.ind_point_range[1]))
+        self._ind_point_current = np.exp(self._log_ind_point)
+        if self.ind_point_range is not None:
+            self._ind_point_current = np.clip(self._ind_point_current, *self.ind_point_range)
+
     def _choice_stochastic(self,qA,qB):
         """generate stochastic choice with logistic function
 
@@ -127,7 +154,7 @@ class DelayedEconomicDecision_AlternateOutput(Task):
             return 0
         offerRatio = qB/qA
         a1 = self.a1_choice
-        ind_point = self.ind_point
+        ind_point = self._ind_point_current
         X = a1*(np.log(offerRatio/ind_point))
         p = 1/(1+np.exp(-X))
 
@@ -160,9 +187,11 @@ class DelayedEconomicDecision_AlternateOutput(Task):
                 * **seqAB** (*str*) -- temporal order of apperance 'AB' or 'BA'
                 * **locAB** (*str*) -- spatial arangement of choice 'AB' or 'BA'; note that this variable is used in the order task but with different meaning
                 * **chooseB** (*int*) -- Indicates whether juice B is chosen (1) or A (0).
+                * **ind_point** (*float*) -- Indifference point used for this trial's stochastic choice (equals :data:`ind_point` when not fluctuating).
                 * **choice** (*int*) -- Indicates whether left choice is chosen (1) or not(0).
         """
 
+        self._update_ind_point() # advance the slowly fluctuating indifference point, once per trial
         params = dict()
 
         onset_time              =self.onset_time
@@ -229,6 +258,7 @@ class DelayedEconomicDecision_AlternateOutput(Task):
                 choice = 1-choice12
             
         params['qA'],params['qB'] = offer_pair
+        params['ind_point'] = self._ind_point_current
         params['choiceFrame'] = choiceFrame
         params['seqAB'] = seqAB
         if choiceFrame=='juice' :
