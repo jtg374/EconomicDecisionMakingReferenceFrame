@@ -15,7 +15,10 @@ dt = 10 # The simulation timestep.
 tau = 100 # The intrinsic time constant of neural state decay.
 T = 4000 # The trial length.
 N_trials_per_condition = 4 # The number of trials per training update.
-dd = DelayedEconomicDecision_AlternateOutput(dt = dt, tau = tau, T = T, N_trials_per_condition = N_trials_per_condition,target_delay_duration=500,wait_duration=500,outputMode='juice')
+# indifference point fixed by default (ind_point_sigma_log=0). Fluctuating settings:
+# ind_point=2.0, ind_point_sigma_log=0.2, ind_point_tau=100, ind_point_range=(1.5,3.0)
+dd = DelayedEconomicDecision_AlternateOutput(dt = dt, tau = tau, T = T, N_trials_per_condition = N_trials_per_condition,target_delay_duration=500,wait_duration=500,outputMode='juice',
+                                             ind_point=1.7, ind_point_sigma_log=0.0, ind_point_tau=100, ind_point_range=(1.5,3.0))
 
 offer_pair_test = [(iA*0.5,iB*0.5*1.7) for iA in range(9) for iB in range(9)]
 dd_test = DelayedEconomicDecision_AlternateOutput(dt = dt, tau = tau, T = 4000, target_delay_duration=500,wait_duration=500,outputMode='juice',
